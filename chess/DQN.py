@@ -139,16 +139,30 @@ def board_to_array(board):
             array.append(color_factor * piece_score[piece[1]])
     return array
 
+#filtrer les coups illegaux
+def filter_legal_moves(list_of_moves, valid_moves):       #list_of_moves est la liste des valeur en sortie du reseau de neurones
+    moves_number = []                               #l'indice des coups valides
+    moves = []
+    i = 0
+    for move in valid_moves:        #list des coups (on ne peut pas la comparer avec list_of_moves)
+        number, index = ((move.start_row + 1) * (move.start_col + 1) * (move.end_row + 1) * (move.end_col + 1) - 1 , i)
+        moves_number.append(number)
+        moves.append(list_of_moves[number])
+        i += 1
+    return moves
+
+
 # Fonction pour sélectionner une action avec epsilon-greedy
-def select_action(q_values, epsilon):
+def select_action(q_values, epsilon, valid_moves):
     if np.random.rand() < epsilon:
-        index = np.random.randint(q_values.size()[1])
-        q_values[0][index] = -10000
-        return index, q_values
+        action = np.random.randint(len(valid_moves))
+        move = valid_moves[action]
+        return  move, action
     else:
-        index= q_values.max(1)[1]
-        q_values[0][index.item()] = -10000
-        return index.item(), q_values
+        action_space = filter_legal_moves(q_values, valid_moves)
+        action = np.argmax(action_space)
+        move = valid_moves[action]
+        return move, action
 
 
 # Fonction pour obtenir la récompense en fonction de l'état du plateau
@@ -169,11 +183,15 @@ class reseau_neurones(nn.Module):
     def __init__(self, input_size, hidden_size, output_size):
         super(reseau_neurones, self).__init__()
         self.fc1 = nn.Linear(input_size, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, output_size)
+        self.fc2 = nn.Linear(hidden_size, 256)
+        self.fc3 = nn.Linear(256, output_size)
 
     def forward(self, x):
         x = torch.relu(self.fc1(x))
         x = self.fc2(x)
+        x = torch.relu(x)
+        x = self.fc3(x)
+        x = torch.relu(x)
         return x
 
 
@@ -183,7 +201,7 @@ board = game_state.board
 # Configuration du réseau de neurones
 input_size = 64  # 64 cases d'échecs
 hidden_size = 128
-output_size = 64  # Nombre de coups possibles
+output_size = 4096  # Nombre de coups possibles 64 * 64 pour le nombre predecesseur fois le nombre de successeur
 net = reseau_neurones(input_size, hidden_size, output_size).to(device)
 
 # Définition de l'algorithme d'optimisation
@@ -192,60 +210,57 @@ optimizer = optim.Adam(net.parameters(), lr=0.001)
 # Paramètres d'apprentissage par renforcement
 gamma = 0.9  # Facteur d'actualisation
 epsilon_start = 0.90  # Exploration vs exploitation au debut
-epsilon_end = 0.01
+epsilon_end = 0.05
 
 # Entraînement par renforcement
 def Train():
-    num_episodes = 100
+    num_episodes = 1000
     i = 0
     for episode in range(num_episodes):
         v = 0
         epsilon = eps(num_episodes, epsilon_start, epsilon_end)
+        score = 0
         while not game_is_over(board) or v < 100:
             state = np.array(board_to_array(board)).reshape(1, -1)
             state_tensor = torch.FloatTensor(state)
-
-            with torch.no_grad():
+            with torch.inference_mode():
                 q_values = net(state_tensor)
-            action = select_action(q_values, epsilon)[0]
-            q_values = select_action(q_values, epsilon)[1]
 
             # Jouer le coup sur le plateau
-            legal_moves = list(game_state.getValidMoves())
-            if action < len(legal_moves):
-                move = legal_moves[action]
-                game_state.makeMove(move)
-                reward = 10
-            elif len(legal_moves) != 0:
-                while action >= len(legal_moves):
-                    print("here")
-                    action = select_action(q_values, epsilon)[0]
-                    q_values = select_action(q_values, epsilon)[1]
-                #print("Action invalide:", action)
-                move = legal_moves[action]
-                game_state.makeMove(move)
-                reward = -10
+            valid_moves = game_state.getValidMoves()
+            if len(valid_moves) != 0:
+                move, action = select_action(q_values[0], epsilon, valid_moves)
             else:
+                print("here")
                 break
+            game_state.makeMove(move)
+
             # Calculer la récompense
-            reward += scoreBoard(game_state)
+            score += scoreBoard(game_state)
 
             new_state = np.array(board_to_array(board)).reshape(1, -1)
             new_state_tensor = torch.FloatTensor(new_state)
 
+            reward = np.sum(new_state) + score
+
+
             with torch.no_grad():
                 new_q_values = net(new_state_tensor)
             max_new_q, _ = torch.max(new_q_values, dim=1)
-            target_q = reward + gamma * max_new_q
+            target_q = reward + 100 * gamma * max_new_q
 
             q_values[0, action] = target_q
 
             # Mise à jour du réseau de neurones
+            q_values_updated = q_values.clone()
+            q_values_updated[0, action] = target_q
+
+            loss = nn.MSELoss()(net(state_tensor), q_values_updated)
             optimizer.zero_grad()
-            loss = nn.MSELoss()(net(state_tensor), q_values)
             loss.backward()
             optimizer.step()
-            v +=1
+            v += 1
+        print(reward)
         i += 1
         if i % 1 == 0:
             print(i)
@@ -254,5 +269,5 @@ def Train():
 
     print("Entraînement terminé.")
 # Enregistrement du modèle entraîné
-#Train()
+#Train() #mettre en commentaire lorsque l'entrainement est terminé
 torch.save(net.state_dict(), 'q_learning_chess_model.pth')
