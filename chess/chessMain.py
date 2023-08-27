@@ -4,7 +4,7 @@ Handling user input.
 Displaying current GameStatus object.
 """
 import pygame as p
-import chessEngine, interpreteur, ChessAI
+import chessEngine, interpreteur, ChessAI, interpreteur_conv_net
 import sys
 from multiprocessing import Process, Queue
 
