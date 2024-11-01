@@ -6,7 +6,6 @@ import torch.nn as nn
 class chess_neural_network(nn.Module):
     def __init__(self, input_size, hidden_size1, hidden_size2, output_size):
         super(chess_neural_network, self).__init__()
-
         # Initialisation des couches
         self.layers = nn.ModuleDict()
         self.layers["layer_1"] = nn.Linear(input_size, hidden_size1)
@@ -21,4 +20,3 @@ class chess_neural_network(nn.Module):
             x = layer(x)
             x = torch.relu(x)
         return x
-
